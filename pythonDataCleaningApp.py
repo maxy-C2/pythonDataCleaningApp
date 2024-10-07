@@ -1,14 +1,19 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy import stats
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 import io  # Required for in-memory file handling
 
+#Set Wide Layout
+st.set_page_config(layout="wide")
+
+
 # Title of the dashboard
 st.title("Data Cleaning Dashboard")
+
+# Initialize session state to store converted column descriptions
+if 'converted_columns' not in st.session_state:
+    st.session_state.converted_columns = {}
 
 # File Upload
 uploaded_file = st.file_uploader("Choose a file", type=["csv", "xls", "xlsx", "json"])
@@ -28,18 +33,72 @@ if uploaded_file is not None:
     st.write("### Data Preview")
     st.dataframe(df.head())
 
-    # 1. Data Summary
+    # 1. Data Summary for Numerical Columns
     if st.checkbox("Show Data Summary"):
-        st.write("### General Summary:")
+        st.write("### General Summary")
         st.write(f"Number of entries: {len(df)}")
         st.write(f"Memory Usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-        st.write("Data Types:", df.dtypes)
-        st.write(df.describe())
+        
+        st.write("##Data Types")
+        df_types = pd.DataFrame(df.dtypes).reset_index()
+        df_types.columns = ['Column Name', 'Data Type']
+        st.dataframe(df_types)
+
+        # Display summary for numerical columns only
+        st.write("### Summary Statistics for Numerical Columns:")
+        
+        summary_df = pd.DataFrame(df.describe()).reset_index()
+        summary_df.columns = ['Statistics', 'Values']
+        st.dataframe(summary_df)
+        
+        
+        # Handling unsupported data types
+        unsupported_columns = [col for col in df.columns if df[col].dtype in ['object', 'complex', 'mixed', 'timedelta64[ns]', 'sparse']]
+
+        # Handle unsupported columns
+        if unsupported_columns:
+            st.warning(f"The following columns contain unsupported data types: {unsupported_columns}")
+            col_to_convert = st.selectbox("Select a column to convert:", unsupported_columns)
+
+            conversion_method = st.selectbox("Choose conversion method:", ["None", "To Numeric", "To String", "Drop Column"])
+
+            if st.button("Convert & Describe"):
+                if conversion_method == "To Numeric":
+                    # Convert to numeric; non-convertible values will be replaced with NaN
+                    df[col_to_convert] = pd.to_numeric(df[col_to_convert], errors='coerce')
+                    st.success(f"Converted column '{col_to_convert}' to numeric.")
+                elif conversion_method == "To String":
+                    # Convert to string
+                    df[col_to_convert] = df[col_to_convert].astype(str)
+                    st.success(f"Converted column '{col_to_convert}' to string.")
+                elif conversion_method == "Drop Column":
+                    # Drop the column
+                    df.drop(columns=[col_to_convert], inplace=True)
+                    st.success(f"Dropped column '{col_to_convert}' from the DataFrame.")
+
+                # Store the description of the converted column in session state
+                st.session_state.converted_columns[col_to_convert] = df[col_to_convert].describe(include='all')
+
+        # Display tables for all converted columns stored in session state
+        if st.session_state.converted_columns:
+            st.write("### Summary Statistics for Converted Columns:")
+            cols = st.columns(len(st.session_state.converted_columns))
+            for i, (col_name, summary) in enumerate(st.session_state.converted_columns.items()):
+                with cols[i]:
+                    st.write(f"**{col_name}**")
+                    
+                    summary_df = pd.DataFrame(summary).reset_index()
+                    summary_df.columns = ['Statistics', 'Values']  # Rename columns
+                    st.dataframe(summary_df)
 
     # 2. Handling Missing Values
     if st.checkbox("Handle Missing Values"):
         st.write("### Missing Values Summary:")
-        st.write(df.isnull().sum())
+        
+        missing_values_df = df.isnull().sum().add((df == '').sum()).add(df.isin([-9999, -1, 0, 'missing', 'na', 'not applicable']).sum()).reset_index()
+        missing_values_df.columns = ['Column Name', 'Number of Missing Entries']
+        st.dataframe(missing_values_df)
+
         method = st.selectbox("Fill missing values with:", ("None", "Mean", "Median", "Mode"))
 
         if method == "Mean":
@@ -122,3 +181,5 @@ if uploaded_file is not None:
         # Convert dataframe to JSON and encode to bytes for download
         json_data = df.to_json().encode('utf-8')
         st.download_button(label="Download JSON", data=json_data, file_name='cleaned_data.json', mime='application/json')
+
+    st.success("Data cleaning completed!")

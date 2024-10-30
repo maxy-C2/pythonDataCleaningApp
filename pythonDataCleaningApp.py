@@ -162,8 +162,8 @@ if uploaded_file is not None:
             # Comprehensive handling of missing values
             missing_values_df = st.session_state.df.isnull().sum() \
                 .add(st.session_state.df.map(lambda x: isinstance(x, str) and x.strip().lower() in ['', 'none', 'missing', 'na', 'not applicable', 'null']).sum()) \
-                .add(st.session_state.df.isin([-9999, -999, -1, 0, 999, 9999, np.inf, -np.inf]).sum()) \
-                .reset_index()
+                .add(st.session_state.df.isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]).sum()) \
+                .reset_index() #removed -1 and 0 from the missing values
             missing_values_df.columns = ['Column Name', 'Number Of Missing Entries']
             return missing_values_df
 
@@ -191,7 +191,7 @@ if uploaded_file is not None:
                     df[column].fillna('None', inplace=True)
                 
                 # Extend handling for placeholders
-                df[column].replace(['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, -1, 0, 999, 9999, np.inf, -np.inf], np.nan, inplace=True)
+                df[column].replace(['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, 999, 9999, np.inf, -np.inf, np.nan], np.nan, inplace=True)
             except Exception as e:
                 st.error(f"Error applying {method} imputation on column '{column}': {e}")
             return df
@@ -294,7 +294,7 @@ if uploaded_file is not None:
                             df[column].fillna('None', inplace=True)
                         
                         # Extend handling for placeholders
-                        df[column].replace(['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, -1, 0, 999, 9999, np.inf, -np.inf], np.nan, inplace=True)
+                        df[column].replace(['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, 999, 9999, np.inf, -np.inf, np.nan], np.nan, inplace=True)
                     except Exception as e:
                         st.error(f"Error applying {method} imputation on column '{column}': {e}")
                     return df
@@ -335,7 +335,7 @@ if uploaded_file is not None:
 
                     # Ensure the missing values are consistently detected
                     st.session_state.df[selected_column].replace(
-                        ['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, -1, 0, 999, 9999, np.inf, -np.inf],
+                        ['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, 999, 9999, np.inf, -np.inf, np.nan],
                         np.nan, inplace=True
                     )
                     try:
@@ -371,7 +371,7 @@ if uploaded_file is not None:
                         try:
                             # Replace missing values placeholders before removal
                             st.session_state.df.replace(
-                                ['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, -1, 0, 999, 9999, np.inf, -np.inf],
+                                ['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, 999, 9999, np.inf, -np.inf, np.nan],
                                 np.nan, inplace=True
                             )
                             st.session_state.df.dropna(how='any', inplace=True)

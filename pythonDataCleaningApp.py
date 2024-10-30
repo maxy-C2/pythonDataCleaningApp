@@ -207,7 +207,7 @@ if uploaded_file is not None:
             for column in df.columns:
                 missing_indicator_df[column] = df[column].isnull() | \
                     df[column].astype(str).str.strip().str.lower().isin(['', 'none', 'missing', 'na', 'not applicable', 'null']) | \
-                    df[column].isin([-9999, -999, -1, 0, 999, 9999, np.inf, -np.inf, np.nan])
+                    df[column].isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]) #removed 0 and -1 as missing values
 
             # Convert boolean values to integers (1 for missing, 0 for non-missing)
             missing_indicator_df = missing_indicator_df.astype(int)

@@ -5,14 +5,19 @@ import streamlit as st
 from scipy import stats
 from scipy.stats import skew, kurtosis, boxcox
 import matplotlib.pyplot as plt
+import plotly.express as px
 import xlsxwriter
 import io  
 import re
+import random
 from thefuzz import fuzz
 from sklearn.impute import KNNImputer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
    
 
@@ -132,20 +137,22 @@ if uploaded_file is not None:
                     else:
                         st.warning("No more steps to undo!")
 
-                # Display updated data types after conversion
-                df_types = pd.DataFrame(st.session_state.df.dtypes).reset_index()
-                df_types.columns = ['Column Name', 'Data Type']
-                st.write("### Updated Data Types:")
-                st.dataframe(df_types)
-                
+                # Display updated data types and conversion history side by side
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("#### Updated Data Types")
+                    df_types = pd.DataFrame(st.session_state.df.dtypes).reset_index()
+                    df_types.columns = ['Column Name', 'Data Type']
+                    st.dataframe(df_types)
 
-            # 1c. Display Conversion History
-            st.write("### Conversion History")
-            if st.session_state.converted_columns:
-                history_df = pd.DataFrame(list(st.session_state.converted_columns.items()), columns=["Column Name", "Converted To"])
-                st.dataframe(history_df)
-            else:
-                st.warning("No columns have been converted yet!")
+                with col2:
+                    st.write("#### Conversion History")
+                    if st.session_state.converted_columns:
+                        history_df = pd.DataFrame(list(st.session_state.converted_columns.items()), columns=["Column Name", "Converted To"])
+                        st.dataframe(history_df)
+                    else:
+                        st.warning("No columns have been converted yet!")
+
 
             # 1d. Summary Statistics for all columns using df.describe()
             st.write("### Summary Statistics for All Columns:")
@@ -163,9 +170,21 @@ if uploaded_file is not None:
             missing_values_df = st.session_state.df.isnull().sum() \
                 .add(st.session_state.df.map(lambda x: isinstance(x, str) and x.strip().lower() in ['', 'none', 'missing', 'na', 'not applicable', 'null']).sum()) \
                 .add(st.session_state.df.isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]).sum()) \
-                .reset_index() #removed -1 and 0 from the missing values
+                .reset_index()
             missing_values_df.columns = ['Column Name', 'Number Of Missing Entries']
             return missing_values_df
+
+        def missing_and_present_counts(selected_column):
+            # Calculate missing count and present count for the selected column
+            missing_count = st.session_state.df[selected_column].isnull().sum() \
+                + st.session_state.df[selected_column].map(lambda x: isinstance(x, str) and x.strip().lower() in ['', 'none', 'missing', 'na', 'not applicable', 'null']).sum() \
+                + st.session_state.df[selected_column].isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]).sum()
+            
+            present_count = st.session_state.df[selected_column].notnull().sum() \
+                - st.session_state.df[selected_column].map(lambda x: isinstance(x, str) and x.strip().lower() in ['', 'none', 'missing', 'na', 'not applicable', 'null']).sum() \
+                - st.session_state.df[selected_column].isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]).sum()
+
+            return missing_count, present_count
 
         # Helper function to ensure a column is numeric, catch exceptions for non-numeric data        
         def ensure_numeric(df, column):
@@ -196,73 +215,55 @@ if uploaded_file is not None:
                 st.error(f"Error applying {method} imputation on column '{column}': {e}")
             return df
 
-        def create_missing_indicator_df():
-            # Get the original DataFrame from the session state
-            df = st.session_state.df
-
-            # Create a binary DataFrame indicating missing values
-            missing_indicator_df = pd.DataFrame()
-
-            # Loop through each column to identify missing values
-            for column in df.columns:
-                missing_indicator_df[column] = df[column].isnull() | \
-                    df[column].astype(str).str.strip().str.lower().isin(['', 'none', 'missing', 'na', 'not applicable', 'null']) | \
-                    df[column].isin([-9999, -999, 999, 9999, np.inf, -np.inf, np.nan]) #removed 0 and -1 as missing values
-
-            # Convert boolean values to integers (1 for missing, 0 for non-missing)
-            missing_indicator_df = missing_indicator_df.astype(int)
-
-            return missing_indicator_df
-
         st.write("### Handling Missing Values")
-
         if st.checkbox("Missing Values"):
             with st.expander("### Missing Values Summary Visualization."):
-                selected_visualization_method = st.selectbox("Select Missing Values Visualization Method:", ["Heatmap", "Table"])
+                selected_visualization_method = st.selectbox("Select Missing Values Visualization Method:", ["Barchart", "Table"])
                 missing_values_df = update_missing_values_df()
-                missing_indicator_df = create_missing_indicator_df()
-                
+
                 if st.button("Show Missing Values Summary"):
-                    if selected_visualization_method == "Heatmap":
-                        # Configure plot size and aesthetics with a larger height-to-width ratio
-                        plt.figure(figsize=(8, 12))  # Adjusted height for narrower columns
+                    if selected_visualization_method == "Barchart":
+                        st.write("Missing Values Barchart")
 
-                        # Create a color map for missing (1) and non-missing (0) values
-                        color_map = np.where(missing_indicator_df == 1, 1, 0)  # Missing values as 1, non-missing as 0
+                        # Bar chart for missing values
+                        st.subheader("Missing Values per Column")
+                        bar_fig = px.bar(missing_values_df, x='Column Name', y='Number Of Missing Entries', title='Missing Values per Column')
+                        st.plotly_chart(bar_fig)
 
-                        # Apply the color map with a custom palette
-                        cmap = sns.color_palette("viridis", as_cmap=True)
+                        # Filter to show only columns with missing values
+                        missing_values_df = missing_values_df[missing_values_df['Number Of Missing Entries'] > 0]
 
-                        # Draw the heatmap using the mask based on color_map
-                        sns.heatmap(
-                            missing_indicator_df,     # Data for the heatmap
-                            cmap=cmap,                # Use the colormap
-                            annot=False,               # Show annotations
-                            #fmt='d',                  # Format annotations as integers
-                            cbar_kws={'label': 'Missing Value Indicator'},  # Color bar label
-                            linewidths=1,             # Line width between cells
-                            linecolor='gray',         # Line color
-                            #mask=(color_map == 0)     # Mask non-missing values
-                        )
+                        # Pie charts for all columns with missing values
+                        st.subheader("Missing Values Pie Charts")
+                        if not missing_values_df.empty:
+                            max_cols = 6  # Set a maximum number of columns to display pie charts in each row
+                            rows_needed = (len(missing_values_df) - 1) // max_cols + 1
 
-                        # Add title and format
-                        plt.title('Heatmap of Missing Values by Column', fontsize=16, weight='bold')
-                        plt.xlabel('Columns')
-                        plt.ylabel('Rows')
-                        plt.xticks(rotation=45, ha='right', fontsize=10)  # Rotate x-axis labels for readability
-                        plt.yticks([])                                   # Hide y-axis labels to focus on columns
-                        
-                        # Adjust layout to make space for x-axis labels
-                        plt.subplots_adjust(bottom=0.2)  # Adjust bottom space for readability
+                            for row in range(rows_needed):
+                                cols = st.columns(min(max_cols, len(missing_values_df) - row * max_cols))
 
-                        # Render the plot in Streamlit
-                        st.pyplot(plt)
-                        
+                                for i, (_, row_data) in enumerate(missing_values_df.iloc[row * max_cols: (row + 1) * max_cols].iterrows()):
+                                    selected_column = row_data['Column Name']
+                                    missing_count, present_count = missing_and_present_counts(selected_column)
+
+                                    # Prepare pie chart data
+                                    pie_data = pd.DataFrame({
+                                        'Status': ['Present', 'Missing'],
+                                        'Count': [present_count, missing_count]
+                                    })
+
+                                    # Create pie chart and plot it in the corresponding column
+                                    with cols[i]:
+                                        pie_fig = px.pie(pie_data, values='Count', names='Status', title=f'Missing Values in {selected_column}', hole=0.3)
+                                        st.plotly_chart(pie_fig)
+                        else:
+                            st.write("No columns with missing values to display.")
+
                     elif selected_visualization_method == "Table":
-                        # Show current missing values
                         st.dataframe(missing_values_df)
                     else:
                         st.error("Invalid visualization method selected!")
+
 
             columns_with_missing = missing_values_df[missing_values_df['Number Of Missing Entries'] > 0]['Column Name'].tolist()
 
@@ -445,11 +446,14 @@ if uploaded_file is not None:
                                 val_2 = st.session_state.df[column_to_match].iloc[j]
                                 if pd.notnull(val) and pd.notnull(val_2):  # Ensure no NaN values
                                     score = fuzz.ratio(val, val_2)  # Perform fuzzy matching on strings
-                                    if score >= threshold:
-                                        matches.append((i, j, val, val_2, score))
+                                    if score >= threshold: 
+                                        if file_type == 'csv' or file_type == 'xls' or file_type == 'xlsx':
+                                            matches.append((i+2, j+2, val, val_2, score))
+                                        else:
+                                            matches.append((i, j, val, val_2, score))
 
                         # Create a DataFrame with the matches
-                        fuzzy_dup_df = pd.DataFrame(matches, columns=["Row 1", "Row 2", "Value 1", "Value 2", "Score"])
+                        fuzzy_dup_df = pd.DataFrame(matches, columns=["Row NO# (First Duplicate Value)", "Row NO# (Second Duplicate Value)", "First Duplicate Value", "Second Duplicate Value", "Duplicate Score/100%"])
 
                         st.write(f"**Fuzzy Matches (String)**: {fuzzy_dup_df.shape[0]} pairs found")
                         st.dataframe(fuzzy_dup_df)
@@ -476,10 +480,14 @@ if uploaded_file is not None:
                                 if pd.notnull(val) and pd.notnull(val_2):
                                     # Check if the absolute difference is within the tolerance percentage
                                     if np.abs(val - val_2) / val <= tolerance / 100:
-                                        matches.append((i, j, val, val_2, np.abs(val - val_2)))
+                                        if file_type == 'csv' or file_type == 'xls' or file_type == 'xlsx':
+                                            matches.append((i+2, j+2, val, val_2, np.abs(val - val_2)))
+                                        else:
+                                            matches.append((i, j, val, val_2, np.abs(val - val_2)))
+                                        
 
                         # Create a DataFrame with the matches
-                        numerical_fuzzy_df = pd.DataFrame(matches, columns=["Row 1", "Row 2", "Value 1", "Value 2", "Difference"])
+                        numerical_fuzzy_df = pd.DataFrame(matches, columns=["Row NO# (First Duplicate Value)", "Row NO# (Second Duplicate Value)", "First Duplicate Value", "Second Duplicate Value", "Duplicate Difference"])
 
                         st.write(f"**Fuzzy Matches (Numerical)**: {numerical_fuzzy_df.shape[0]} pairs found")
                         st.dataframe(numerical_fuzzy_df)
@@ -600,8 +608,6 @@ if uploaded_file is not None:
                     else:
                         st.warning("No more steps to undo!")
 
-
-                        
                     
             # ii) Removing Duplicates
             st.write("##### Removing Duplicates")
@@ -628,12 +634,13 @@ if uploaded_file is not None:
 
     def outlierDetection():
         st.write("### Handling Outliers")
+
+        # Outliers for Numerical Columns
         numerical_columns = st.session_state.df.select_dtypes(include=np.number).columns.tolist()
         outlier_summary = {}
         # Outlier Detection Summary Table
-        if st.checkbox("Outliers Summary"):
+        if st.checkbox("Outliers Summary for Numerical Columns"):
             with st.expander("Outliers Detection Per Column"):
-                # Detecting outliers for each numerical column
                 for col in numerical_columns:
                     Q1 = st.session_state.df[col].quantile(0.25)
                     Q3 = st.session_state.df[col].quantile(0.75)
@@ -645,8 +652,8 @@ if uploaded_file is not None:
                 st.write("Outlier Summary")
                 st.dataframe(outlier_summary_df)
 
-            # Visualization Options
-            with st.expander("Outlier Visualization"):
+            # Visualization Options for Numerical Columns
+            with st.expander("Outlier Visualization for Numerical Columns"):
                 vis_option = st.selectbox("Choose Visualization Type", ["Select", "Box Plot", "Scatter Plot"])
 
                 try:
@@ -679,6 +686,96 @@ if uploaded_file is not None:
                     st.error(f"Error occurred: {e}")
                     st.error("Ensure that your selected columns have the correct data types and are suitable for the chosen visualization.")
 
+        # Outliers for String Columns
+        string_columns = st.session_state.df.select_dtypes(include="string").columns.tolist()
+
+        if st.checkbox("Outliers Summary for String Columns"):
+            with st.expander("Outliers Detection for String Columns"):
+                summary_data = []
+                outlier_string_summary = {}
+
+                for col in string_columns:
+
+                    # Step 1: Frequency Analysis
+                    freq_analysis = st.session_state.df[col].value_counts()
+
+                    # Filter out strings that are extremely rare (e.g., appear only once)
+                    rare_strings = freq_analysis[freq_analysis == 1].index.tolist()
+                    num_rare_strings = len(rare_strings)
+                    
+                    # Step 2: Text Vectorization
+                    vectorizer = CountVectorizer()
+                    vectorized_data = vectorizer.fit_transform(st.session_state.df[col].astype(str))
+                    
+                    # Step 3: Clustering with K-Means
+                    optimal_clusters = 3  # Adjust as needed
+                    kmeans = KMeans(n_clusters=optimal_clusters, random_state=42)
+                    st.session_state.df[f"{col}_cluster"] = kmeans.fit_predict(vectorized_data)
+                    silhouette_avg = silhouette_score(vectorized_data, kmeans.labels_)
+                    silhouette_desc = "Good clustering" if silhouette_avg > 0.5 else "Needs improvement"
+                   
+                    # Combine Results
+                    cluster_summary = st.session_state.df.groupby(f"{col}_cluster")[col].value_counts()
+                    
+                    # Identify outliers based on clusters with rare strings
+                    rare_string_clusters = []
+                    for cluster, freq in cluster_summary.groupby(level=0):
+                        if all(item in rare_strings for item in freq.index):
+                            rare_string_clusters.append(cluster)
+
+                    # Mark strings in rare clusters as outliers
+                    outliers = st.session_state.df[st.session_state.df[f"{col}_cluster"].isin(rare_string_clusters)][col].unique()
+                    outlier_string_summary[col] = list(outliers)
+
+                    # Append details for summary table
+                    summary_data.append({
+                        "Column": col,
+                        "Silhouette Score": silhouette_avg,
+                        "Score Description": silhouette_desc,
+                        "Number of Rare Strings": num_rare_strings
+                    })
+
+                # Display summary table
+                summary_df = pd.DataFrame(summary_data)
+                st.write("Summary Table for String Columns")
+                st.dataframe(summary_df)
+
+                # Display outliers summary
+                outlier_string_summary_df = pd.DataFrame([(col, ", ".join(outliers)) for col, outliers in outlier_string_summary.items()], columns=["Column", "Outliers"])
+                st.write("Outlier Summary for String Columns")
+                st.dataframe(outlier_string_summary_df)
+
+                # Step 4: Scatter Plot with Random Distribution for Clustering Visualization
+                for col in string_columns:
+                    st.write(f"### Scatter Plot for Column: {col}")
+                    
+                    # Frequency analysis data
+                    freq_analysis = st.session_state.df[col].value_counts()
+                    x_values = [random.uniform(0, max(freq_analysis)) for _ in range(len(freq_analysis))]
+                    y_values = [random.uniform(0, max(freq_analysis)) for _ in range(len(freq_analysis))]
+
+                    # Scatter plot with annotations
+                    plt.figure(figsize=(10, 6))
+                    for i, (category, freq) in enumerate(freq_analysis.items()):
+                        color = 'red' if category in rare_strings else 'blue'
+                        plt.scatter(x_values[i], y_values[i], color=color, label=category if category in rare_strings else "", s=100)
+
+                        # Annotate rare strings
+                        if category in rare_strings:
+                            plt.annotate(f"{category} (Rare)", (x_values[i], y_values[i]), textcoords="offset points", xytext=(0,5), ha='center')
+
+                    # Setting plot limits for clear clustering display
+                    plt.xlim(0, max(freq_analysis) + 3)
+                    plt.ylim(0, max(freq_analysis) + 3)
+                    plt.xlabel('Random X')
+                    plt.ylabel('Random Y')
+                    plt.title(f'Scatter Plot with Annotated Rare String Clusters for Column {col}')
+                    plt.grid()
+
+                    # Show the scatter plot
+                    st.pyplot(plt)
+
+            # Step 5: Outlier Handling    
             # Outlier Handling Options
             with st.expander("Outlier Handling"):
                 st.write("Select Outlier Handling Method")

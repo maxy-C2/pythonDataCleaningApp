@@ -45,14 +45,86 @@ if uploaded_file is not None:
     file_type = uploaded_file.name.split('.')[-1]
 
     if file_type == 'csv':
-        st.session_state.original_df = pd.read_csv(uploaded_file)
+        try:
+            #Attempt to read the file with UTF-8 encoding
+            st.session_state.original_df = pd.read_csv(uploaded_file)
+            
+        except UnicodeDecodeError:
+            #Fallback to another encoding if UTF-8 fails
+            st.warning("File encoding issue detected. Attempting to decodewith 'latin1'.")
+            st.session_state.original_df = pd.read_csv(uploaded_file, encoding='latin1')
     elif file_type in ['xls', 'xlsx']:
-        st.session_state.original_df = pd.read_excel(uploaded_file)
+        try:
+            #Attempt to read the file with UTF-8 encoding
+            st.session_state.original_df = pd.read_excel(uploaded_file)
+            
+        except UnicodeDecodeError:
+            #Fallback to another encoding if UTF-8 fails
+            st.warning("File encoding issue detected. Attempting to decodewith 'latin1'.")
+            st.session_state.original_df = pd.read_csv(uploaded_file, encoding='latin1')
+            
     elif file_type == 'json':
-        st.session_state.original_df = pd.read_json(uploaded_file)
+        try:
+            #Attempt to read the file with UTF-8 encoding
+            st.session_state.original_df = pd.read_json(uploaded_file)
+        
+        except UnicodeDecodeError:
+            #Fallback to another encoding if UTF-8 fails
+            st.warning("File encoding issue detected. Attempting to decodewith 'latin1'.")
+            st.session_state.original_df = pd.read_csv(uploaded_file, encoding='latin1')
     else:
         st.error("Unsupported file type!")
 
+    
+    def stringSeparation():
+        
+        st.write("### Question-Response Transformation")
+        # File Upload
+        if st.checkbox("Upload and Transform Question-Response Data"):
+            # Ensure there are string columns for selection
+            string_columns = st.session_state.df.select_dtypes(include="object").columns.tolist()
+            
+            if len(string_columns) >= 2:
+                with st.expander("### Select Columns for Transformation"):
+                    question_col = st.selectbox("Select the Question Column", options=string_columns)
+                    response_col = st.selectbox("Select the Response Column", options=string_columns)
+
+                    if st.button("Apply Question-Response Transformation"):
+                        # Initialize dictionary to store unique questions
+                        unique_questions = {}
+
+                        # Process selected columns
+                        for index, (question, response) in enumerate(zip(st.session_state.df[question_col], st.session_state.df[response_col])):
+                            # Ensure each question is unique and create a new column if not present
+                            if question not in unique_questions:
+                                unique_questions[question] = []
+
+                            # Append the response with the correct index position
+                            unique_questions[question].append((index, response))
+
+                        # Create new columns based on unique questions and populate responses
+                        for question, responses in unique_questions.items():
+                            st.session_state.df[question] = None
+                            for idx, resp in responses:
+                                st.session_state.df.at[idx, question] = resp  # Place response in corresponding row
+                        
+                        # Sort the DataFrame by index to arrange rows in ascending order
+                        st.session_state.df.sort_index(inplace=True)
+
+                        st.write("#### Transformed Data with Question-Based Columns")
+                        st.dataframe(st.session_state.df)
+
+                        # Optional Download
+                        #csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+                        #st.download_button("Download Transformed Data as CSV", data=csv, file_name="transformed_data.csv", mime="text/csv")
+            else:
+                st.warning("Please ensure your CSV file has at least two string columns for selection.")
+            
+    stringSeparation()    
+    
+    
+    
+    
     def dataSummary():
         # 1a. Automatically convert text columns to lowercase and sanitize
         def clean_and_convert_text_columns(df):
@@ -85,7 +157,7 @@ if uploaded_file is not None:
                 df_types = pd.DataFrame(st.session_state.df.dtypes).reset_index()
                 df_types.columns = ['Column Name', 'Data Type']
                 st.dataframe(df_types)
-
+        if st.checkbox("Data Type Conversion"):
             # 1bi. Columns with Supported Data Types
             with st.expander("### Columns with Supported Data Types"):
                 supported_columns = st.session_state.df.select_dtypes(include=['number','string', 'bool', 'datetime64']).columns.tolist()
@@ -153,12 +225,12 @@ if uploaded_file is not None:
                     else:
                         st.warning("No columns have been converted yet!")
 
-
-            # 1d. Summary Statistics for all columns using df.describe()
-            st.write("### Summary Statistics for All Columns:")
-            summary_df = pd.DataFrame(st.session_state.df.describe(include='all')).reset_index()        
-            summary_df.columns = ['Statistics'] + list(st.session_state.df.columns)
-            st.dataframe(summary_df)
+            with st.expander("### Statistical Summary"):
+                # 1d. Summary Statistics for all columns using df.describe()
+                st.write("### Summary Statistics for All Columns:")
+                summary_df = pd.DataFrame(st.session_state.df.describe(include='all')).reset_index()        
+                summary_df.columns = ['Statistics'] + list(st.session_state.df.columns)
+                st.dataframe(summary_df)
             
     dataSummary()
 
@@ -216,8 +288,8 @@ if uploaded_file is not None:
             return df
 
         st.write("### Handling Missing Values")
-        if st.checkbox("Missing Values"):
-            with st.expander("### Missing Values Summary Visualization."):
+        if st.checkbox("Missing Value Summary"):
+            with st.expander("### Visualization Of Missing Values."):
                 selected_visualization_method = st.selectbox("Select Missing Values Visualization Method:", ["Barchart", "Table"])
                 missing_values_df = update_missing_values_df()
 
@@ -268,7 +340,7 @@ if uploaded_file is not None:
             columns_with_missing = missing_values_df[missing_values_df['Number Of Missing Entries'] > 0]['Column Name'].tolist()
 
             # Removed Machine Learning Imputation     
-                             
+        if st.checkbox("Mean | Mode | Median Imputation"):                 
             # Basic Imputation
             with st.expander("### Basic Imputation"):
                 # Helper function to ensure a column is numeric, catch exceptions for non-numeric data        
@@ -325,7 +397,8 @@ if uploaded_file is not None:
                         st.success(f"Undo Basic Imputation for column '{selected_column}'.")
                     else:
                         st.warning("No more steps to undo!")
-
+                        
+        if st.checkbox("Forward Fill | Backward Fill"):
             # Forward/Backward Fill
             with st.expander("### Forward Fill and Backward Fill"):
                 selected_column = st.selectbox("Select A Column To Handle Missing Values (Forward/Backward Fill):", columns_with_missing)
@@ -360,7 +433,7 @@ if uploaded_file is not None:
                     else:
                         st.warning("No more steps to undo!")
 
-
+        if st.checkbox("Removing Rows With Missing Values"):
             # Remove Rows or Columns with Missing Values
             with st.expander("### Remove Rows with Missing Values"):
                 removal_method = st.selectbox("Remove Rows:", ("Remove Rows with Missing Values",))
@@ -392,6 +465,40 @@ if uploaded_file is not None:
                     else:
                         st.warning("No more steps to undo!")
                         
+        if st.checkbox("Removing Columns With Missing Values"):
+            # Remove Rows or Columns with Missing Values
+            with st.expander("### Remove Columns with Missing Values"):
+                removal_method = st.selectbox("Remove Columns:", ("Remove Columns with Missing Values",))
+
+                if st.button("Apply Column Removal"):
+                    st.session_state.history.append(st.session_state.df.copy(deep=True))
+
+                    if removal_method == "Remove Columns with Missing Values":
+                        try:
+                            # Replace missing value placeholders before removal
+                            st.session_state.df.replace(
+                                ['', 'none', 'missing', 'na', 'not applicable', 'null', -9999, -999, 999, 9999, np.inf, -np.inf, np.nan],
+                                np.nan, inplace=True
+                            )
+                            st.session_state.df.dropna(axis=1, how='any', inplace=True)
+                            st.success(f"Applied {removal_method}.")
+
+                        except Exception as e:
+                            st.error(f"Error applying {removal_method}: {e}")
+
+                    missing_values_df = update_missing_values_df()
+                    st.dataframe(missing_values_df)
+
+                # Undo functionality
+                if st.button("Undo Column Removal"):
+                    if st.session_state.history:
+                        st.session_state.df = st.session_state.history.pop()
+                        st.success(f"Undo Column Removal.")
+                    else:
+                        st.warning("No more steps to undo!")
+
+                        
+        if st.checkbox("Data Preview After Handling Missing Values"):            
             with st.expander("### Data Preview After Handling Missing Values"):
                 st.dataframe(st.session_state.df)
                         
@@ -400,7 +507,7 @@ if uploaded_file is not None:
     def handleDuplicates():        
         # 3. Handling Duplicates
         st.write("### Handling Duplicates")
-        if st.checkbox("Duplicates"):
+        if st.checkbox("Identifying Duplicates"):
             # a) Identifying Duplicates
             st.write("##### Identifying Duplicates")
             
@@ -495,6 +602,7 @@ if uploaded_file is not None:
                     else:
                         st.warning("No columns available for the selected data type.")
 
+        if st.checkbox("Aggregating Duplicates"):
             # b) Handling Duplicates
             st.write("##### Aggregating Duplicates")
             # i) Aggregating Data
@@ -608,7 +716,7 @@ if uploaded_file is not None:
                     else:
                         st.warning("No more steps to undo!")
 
-                    
+        if st.checkbox("Removing Duplicates"):        
             # ii) Removing Duplicates
             st.write("##### Removing Duplicates")
             with st.expander("Removing Exact Duplicates"):
@@ -840,7 +948,7 @@ if uploaded_file is not None:
         summary = []
         
         # Display data distribution summary
-        if st.checkbox("Normalization and Scaling"):
+        if st.checkbox("Data Distribution Summary"):
             with st.expander("Show Data Distribution Summary"):
                 for col in numerical_columns:
                     data = st.session_state.df[col].dropna()
@@ -881,7 +989,7 @@ if uploaded_file is not None:
                 summary_df = pd.DataFrame(summary)
                 st.write("Summary of Data Distribution, Range, and Outliers:")
                 st.dataframe(summary_df)
-            
+        if st.checkbox("Data Normalization and Visualization"):
             # Normalization Options
             with st.expander("Normalization And Visualization Options"):
                 st.write("##### Choose Normalization Method and Columns")
@@ -982,9 +1090,9 @@ if uploaded_file is not None:
                         st.success("Successfully reverted the last normalization step.")
                     else:
                         st.warning("No previous normalization steps to undo.")
-
+        if st.checkbox("View Pair Plot For Numerical Columns"):
             # Add Pair Plot for All Numerical Columns
-            with st.expander("View Pair Plot for All Numerical Columns"):
+            with st.expander("Pair Plot "):
                 st.write("##### Pair Plot of Selected Numerical Columns")
                 pairplot_color = st.selectbox("Select Categorical Column for Color (Optional)", [None] + st.session_state.df.select_dtypes(include="category").columns.tolist())
                 selected_pairplot_columns = st.multiselect("Select Numerical Columns for Pair Plot", numerical_columns)
@@ -1007,7 +1115,10 @@ if uploaded_file is not None:
     normalization()
 
 
-
+    
+                
+                
+                
     def textConsistency():
         # 6a. Text Data Consistency
         st.write("### Handling Text Data Consistency")
